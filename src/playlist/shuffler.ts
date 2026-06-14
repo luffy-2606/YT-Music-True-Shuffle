@@ -25,11 +25,23 @@
  *
  * For 1000 tracks: 999 moves → 34 requests (at 30/batch) → ~17s with delays.
  *
+ * WHY NOT REMOVE + RE-ADD?
+ *   Removing all tracks before re-adding is dangerous:
+ *     • If the add step fails (400/429/network), the playlist is empty.
+ *     • ACTION_REMOVE_VIDEO is not a valid action name — YouTube Music's
+ *       internal API requires ACTION_REMOVE_VIDEO_BY_SET_VIDEO_ID.
+ *     • ACTION_ADD_VIDEO requires field `addedVideoId`, not `videoId`.
+ *   Move operations are non-destructive: the playlist stays intact if
+ *   any batch fails, and the user can retry or restore from backup.
+ *
  * ────────────────────────────────────────────────────────────────────────────
  */
 
 import { logger } from '../utils/logger';
 import { sleep, chunk } from '../utils/dom';
+// NOTE: do NOT import retry here. apiClient.editPlaylist() already retries
+// internally via post(). Wrapping it in a second retry() causes 3×3 = 9
+// network requests per failed batch, which pollutes logs and hammers rate limits.
 import { apiClient } from '../api/ytMusicApi';
 import type { MoveVideoAction, PlaylistTrack } from '../api/types';
 
@@ -38,6 +50,14 @@ const BATCH_SIZE = 30;
 
 /** Delay between batches (ms). Keep well below rate-limit thresholds. */
 const BATCH_DELAY_MS = 600;
+
+/**
+ * YouTube Music emits this sentinel when it hasn't resolved a track's
+ * setVideoId (unavailable tracks, podcasts, local uploads). It is truthy,
+ * so a simple `!t.setVideoId` check won't catch it. Must be explicitly
+ * excluded — sending it to edit_playlist causes HTTP 400 for the whole batch.
+ */
+const PLACEHOLDER_SET_VIDEO_ID = 'to_be_updated_by_client';
 
 export type ShufflerProgressFn = (params: {
   completedMoves: number;
@@ -58,8 +78,15 @@ export class PlaylistShuffler {
   /**
    * Reorder `playlistId` so that its tracks match `desiredOrder`.
    *
+   * Uses only ACTION_MOVE_VIDEO_BEFORE — the playlist is never emptied,
+   * so a mid-operation failure leaves it in a partially-reordered (but
+   * intact) state rather than wiped.
+   *
    * @param playlistId   - Raw playlist ID (no "VL" prefix)
-   * @param desiredOrder - Tracks in the desired final order
+   * @param desiredOrder - Tracks in the desired final order; every track
+   *                       MUST have a valid `setVideoId` (the per-entry
+   *                       token assigned by YouTube Music, distinct from
+   *                       `videoId` which is the video itself)
    * @param signal       - Optional AbortSignal for cancellation
    */
   async applyOrder(
@@ -72,84 +99,78 @@ export class PlaylistShuffler {
       return;
     }
 
-    logger.time('applyOrder');
-    logger.info(
-      `Applying new order to playlist ${playlistId} (${desiredOrder.length} tracks)`
+    // FIX: Guard against both missing AND placeholder setVideoId values.
+    //
+    // The original check (!t.setVideoId) only catches null/undefined/empty.
+    // YouTube Music also emits the literal string "to_be_updated_by_client"
+    // as a sentinel for unresolved tracks. That string is truthy, so it
+    // bypasses the original guard and ends up in the actions array, causing
+    // HTTP 400 INVALID_ARGUMENT for the entire batch.
+    //
+    // parseTrackItem in ytMusicApi.ts now drops these tracks at collection
+    // time, so they should never reach here. This is a second line of defence.
+    const missing = desiredOrder.filter(
+      t => !t?.setVideoId || t.setVideoId === PLACEHOLDER_SET_VIDEO_ID
     );
 
-    // Build move actions: process right-to-left
+    if (missing.length > 0) {
+      throw new Error(
+        `${missing.length} track(s) have a missing or placeholder setVideoId — ` +
+        'try refreshing the page and reshuffling to get fresh tokens. ' +
+        `Affected titles: ${missing.slice(0, 5).map(t => t.title).join(', ')}` +
+        (missing.length > 5 ? ` … and ${missing.length - 5} more` : '')
+      );
+    }
+
+    logger.time('applyOrder');
+    logger.info(
+      `Soft-shuffling playlist ${playlistId} (${desiredOrder.length} tracks)`
+    );
+
+    const n = desiredOrder.length;
+
+    // Build the full move list (right-to-left insertion, n-1 moves total).
+    // Each move: "place T[i-1] immediately before T[i]"
     const actions: MoveVideoAction[] = [];
-    for (let i = desiredOrder.length - 1; i >= 1; i--) {
-      const item = desiredOrder[i - 1];
-      const successor = desiredOrder[i];
-
-      // Both items must have a setVideoId
-      if (!item || !successor || !item.setVideoId || !successor.setVideoId) {
-        logger.warn(`Skipping move at index ${i}: missing setVideoId`);
-        continue;
-      }
-
+    for (let i = n - 1; i >= 1; i--) {
       actions.push({
         action: 'ACTION_MOVE_VIDEO_BEFORE',
-        setVideoId: item.setVideoId,
-        movedSetVideoIdSuccessor: successor.setVideoId,
+        setVideoId: desiredOrder[i - 1].setVideoId!,
+        movedSetVideoIdSuccessor: desiredOrder[i].setVideoId!,
       });
     }
 
-    logger.info(`Generated ${actions.length} move action(s)`);
+    logger.info(`Generated ${actions.length} safe move operations`);
 
     const batches = chunk(actions, BATCH_SIZE);
-    const totalBatches = batches.length;
+    const totalMoves = actions.length;
     let completedMoves = 0;
 
-    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    for (let bi = 0; bi < batches.length; bi++) {
       this.checkAbort(signal);
 
-      const batch = batches[batchIdx];
-      if (!batch) continue;
+      // editPlaylist → post() already retries up to 3× internally.
+      // Do NOT add another retry() here.
+      await apiClient.editPlaylist(playlistId, batches[bi]);
 
-      logger.debug(
-        `Batch ${batchIdx + 1}/${totalBatches}: ${batch.length} action(s)`
-      );
+      completedMoves += batches[bi].length;
 
-      try {
-        const result = await apiClient.editPlaylist(playlistId, batch);
+      this.onProgress?.({
+        completedMoves,
+        totalMoves,
+        batchIndex: bi + 1,
+        totalBatches: batches.length,
+      });
 
-        if (result.status && result.status !== 'STATUS_SUCCEEDED') {
-          logger.warn(
-            `Unexpected status from edit_playlist: ${result.status}`,
-            result
-          );
-        }
-
-        completedMoves += batch.length;
-        this.onProgress?.({
-          completedMoves,
-          totalMoves: actions.length,
-          batchIndex: batchIdx + 1,
-          totalBatches,
-        });
-
-        logger.debug(
-          `Batch ${batchIdx + 1} OK — ${completedMoves}/${actions.length} moves complete`
-        );
-      } catch (err) {
-        logger.error(`Batch ${batchIdx + 1} failed`, err);
-        throw new Error(
-          `Reorder failed at batch ${batchIdx + 1}/${totalBatches}: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      }
-
-      // Rate-limit gap between batches (skip after last)
-      if (batchIdx < batches.length - 1) {
+      // Skip the delay after the last batch
+      if (bi < batches.length - 1) {
+        this.checkAbort(signal);
         await sleep(BATCH_DELAY_MS);
       }
     }
 
     logger.timeEnd('applyOrder');
-    logger.info('All move actions applied successfully');
+    logger.info('Playlist reorder complete');
   }
 
   private checkAbort(signal?: AbortSignal): void {
