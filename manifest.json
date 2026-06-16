@@ -6,7 +6,8 @@
   "permissions": [
     "cookies",
     "storage",
-    "activeTab"
+    "activeTab",
+    "tabs"
   ],
   "host_permissions": [
     "https://music.youtube.com/*"

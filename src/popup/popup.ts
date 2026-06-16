@@ -8,19 +8,9 @@ import type { PlaylistBackup } from '../storage/backup';
 const KEY_PREFIX = 'ytms_backup_';
 
 async function init(): Promise<void> {
-  const allData = await chrome.storage.local.get(null);
-  const backups: PlaylistBackup[] = Object.entries(allData)
-    .filter(([k]) => k.startsWith(KEY_PREFIX))
-    .map(([, v]) => v as PlaylistBackup)
-    .sort(
-      (a, b) =>
-        new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
-    );
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  const tab = await getActiveTab();
-  const onPlaylist =
-    !!tab?.url?.match(/music\.youtube\.com\/playlist\?list=/);
-
+  const onPlaylist = !!tab?.url?.match(/music\.youtube\.com\/playlist\?list=/);
   const currentListId = tab?.url
     ? new URL(tab.url).searchParams.get('list')
     : null;
@@ -28,7 +18,8 @@ async function init(): Promise<void> {
   const root = document.getElementById('app');
   if (!root) return;
 
-  if (!onPlaylist) {
+  // Not on a playlist page
+  if (!onPlaylist || !currentListId || !tab?.id) {
     root.innerHTML = `
       <div class="state-empty">
         <div class="icon">🎵</div>
@@ -37,51 +28,92 @@ async function init(): Promise<void> {
     return;
   }
 
-  const currentBackup = backups.find(b => b.playlistId === currentListId);
+  // Load backup info
+  const allData = await chrome.storage.local.get(null);
+  const backup = allData[`${KEY_PREFIX}${currentListId}`] as
+    | PlaylistBackup
+    | undefined;
+
+  const backupHtml = backup
+    ? `<div class="backup-row">
+         <span class="backup-badge">✓ Backup saved</span>
+         <span class="backup-meta">
+           ${new Date(backup.savedAt).toLocaleDateString()} · ${backup.trackCount} tracks
+         </span>
+       </div>`
+    : `<div class="no-backup">No backup for this playlist yet.</div>`;
+
+  const playlistTitle = backup?.playlistTitle ?? '<your_playlist>';
 
   root.innerHTML = `
     <div class="on-playlist">
       <div class="playlist-label">Current playlist</div>
-      <div class="playlist-title">${esc(currentBackup?.playlistTitle ?? 'Unknown playlist')}</div>
+      <div class="playlist-title">${esc(playlistTitle)}</div>
 
-      ${
-        currentBackup
-          ? `<div class="backup-info">
-               <span class="backup-badge">✓ Backup saved</span>
-               <span class="backup-date">${new Date(currentBackup.savedAt).toLocaleString()}</span>
-               <span class="backup-count">${currentBackup.trackCount} tracks</span>
-             </div>
-             <button id="restore-btn" class="btn-restore">↩ Restore original order</button>`
-          : '<div class="no-backup">No backup for this playlist yet.</div>'
-      }
+      <button id="shuffle-btn" class="btn-primary">
+        Permanently Shuffle
+      </button>
+
+      ${backup
+        ? `<button id="restore-btn" class="btn-secondary">
+             <span class="btn-icon">↩</span> Restore original order
+           </button>`
+        : ''}
+
+      ${backupHtml}
 
       <div class="divider"></div>
       <div class="hint">
-        Click <strong>True Shuffle</strong> on the playlist page to shuffle.
-        A backup is saved automatically before any changes.
+        Shuffle permanently reorders your playlist.<br>
+        A backup is saved (in your local storage) automatically before any changes.
       </div>
     </div>
   `;
 
-  document.getElementById('restore-btn')?.addEventListener('click', async () => {
-    if (!tab?.id) return;
-    const btn = document.getElementById('restore-btn') as HTMLButtonElement;
-    btn.disabled = true;
-    btn.textContent = 'Restoring…';
+  // Shuffle button
+  document.getElementById('shuffle-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('shuffle-btn') as HTMLButtonElement;
+    btn.disabled    = true;
+    btn.textContent = '⏳ Starting…';
 
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'YTMS_RESTORE' });
+      await chrome.tabs.sendMessage(tab.id!, { type: 'YTMS_SHUFFLE' });
+      // Focus the tab so the user can see the progress modal
+      await chrome.tabs.update(tab.id!, { active: true });
       window.close();
     } catch {
-      btn.textContent = '⚠ Could not reach page — try clicking Restore on the playlist directly';
-      btn.disabled = false;
+      btn.disabled    = false;
+      btn.innerHTML   = 'Permanently Shuffle';
+      showError('Could not reach the page. Make sure the playlist is fully loaded and try again.');
+    }
+  });
+
+  // ── Restore button ───────────────────────────────────────────────────────
+  document.getElementById('restore-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('restore-btn') as HTMLButtonElement;
+    btn.disabled    = true;
+    btn.textContent = '⏳ Starting…';
+
+    try {
+      await chrome.tabs.sendMessage(tab.id!, { type: 'YTMS_RESTORE' });
+      await chrome.tabs.update(tab.id!, { active: true });
+      window.close();
+    } catch {
+      btn.disabled    = false;
+      btn.innerHTML   = '<span class="btn-icon">↩</span> Restore original order';
+      showError('Could not reach the page. Make sure the playlist is open and try again.');
     }
   });
 }
 
-async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab;
+function showError(msg: string): void {
+  const existing = document.getElementById('popup-error');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.id        = 'popup-error';
+  div.className = 'error-msg';
+  div.textContent = msg;
+  document.getElementById('app')?.appendChild(div);
 }
 
 function esc(str: string): string {

@@ -7,11 +7,15 @@ export const EXTENSION_STYLES = `
 /* ----- Button ----- */
 
 .ytms-btn-wrap {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 10px;
-  vertical-align: middle;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  clear: both;
+  margin-top: 24px; 
+  margin-bottom: 10px;
+  box-sizing: border-box;
 }
 
 .ytms-shuffle-btn,
@@ -21,7 +25,7 @@ export const EXTENSION_STYLES = `
   justify-content: center;
   gap: 7px;
   height: 36px;
-  padding: 0 20px;
+  padding: 0 24px;
   border: none;
   border-radius: 18px;
   cursor: pointer;
@@ -144,7 +148,7 @@ export const EXTENSION_STYLES = `
   margin-top: 2px;
 }
 
-/* ----- Progress area ----- */
+/* ── Progress area ────────────────────────────────────────────────────────── */
 
 .ytms-status {
   font-size: 14px;

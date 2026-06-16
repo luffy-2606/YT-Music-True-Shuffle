@@ -1,6 +1,10 @@
 /**
- * ButtonInjector — injects the "True Shuffle" and "Restore" buttons into the
+ * ButtonInjector — injects the "Permanently Shuffle" and "Restore" buttons into the
  * YouTube Music playlist header.
+ *
+ * YTM's header DOM structure changes occasionally. We try a ranked list of
+ * selectors and fall back gracefully. A MutationObserver monitors for the
+ * button being detached by YTM's own re-renders.
  */
 
 import { logger } from '../utils/logger';
@@ -12,24 +16,20 @@ const STYLES_ID = 'ytms-styles';
 
 /**
  * Ranked candidate selectors for the playlist action bar.
- * Ordered from most to least specific.
+ * Ordered from most to least specific / stable.
  */
 const HEADER_SELECTORS = [
-  // YTM detail header
-  'ytmusic-detail-header-renderer .action-buttons',
-  'ytmusic-detail-header-renderer .buttons',
-
-  // Responsive header
-  'ytmusic-responsive-header-renderer .action-buttons',
-  'ytmusic-responsive-header-renderer .buttons',
-
-  // Immersive header
-  'ytmusic-immersive-header-renderer .action-buttons',
-
-  // Fallback:
+  // Primary Choice: Target the layout blocks directly so our full-width container appends underneath
   'ytmusic-detail-header-renderer',
   'ytmusic-responsive-header-renderer',
   'ytmusic-immersive-header-renderer',
+  
+  // Backups/Fallbacks if YTM layout structure drifts
+  'ytmusic-detail-header-renderer .action-buttons',
+  'ytmusic-detail-header-renderer .buttons',
+  'ytmusic-responsive-header-renderer .action-buttons',
+  'ytmusic-responsive-header-renderer .buttons',
+  'ytmusic-immersive-header-renderer .action-buttons',
 ];
 
 const SVG_SHUFFLE = `
@@ -60,17 +60,21 @@ export class ButtonInjector {
   private currentPlaylistId: string | null = null;
   private callbacks: ButtonCallbacks | null = null;
 
-  /* Inject buttons for `playlistId`. */
+  /**
+   * Inject buttons for `playlistId`.
+   * Safe to call multiple times — deduplication is handled internally.
+   */
   async inject(playlistId: string, callbacks: ButtonCallbacks): Promise<boolean> {
     // Skip if already injected for the same playlist
     if (
       this.currentPlaylistId === playlistId &&
       document.getElementById(WRAP_ID)
     ) {
+      logger.debug('Buttons already present — skipping injection');
       return true;
     }
 
-    this.destroy();
+    this.destroy(); // Clean up previous injection
     this.callbacks = callbacks;
     this.currentPlaylistId = playlistId;
 
@@ -81,11 +85,13 @@ export class ButtonInjector {
       logger.warn('Could not find playlist header — button injection failed');
       return false;
     }
-    
+
+    logger.info(`Injecting into header (selector: "${found.selector}")`);
+
     const wrap = this.buildButtonWrap();
     found.el.appendChild(wrap);
 
-    // check for existing backup and show restore btn if needed
+    // Async: check for existing backup and show restore btn if needed
     callbacks.hasBackup().then(has => {
       this.setRestoreVisible(has);
     });
@@ -112,7 +118,7 @@ export class ButtonInjector {
     this.shuffleBtn.disabled = loading;
     this.shuffleBtn.innerHTML = loading
       ? `${SVG_SPIN} Shuffling…`
-      : `${SVG_SHUFFLE} True Shuffle`;
+      : `${SVG_SHUFFLE} Permanently Shuffle`;
   }
 
   /** Show or hide the Restore button. */
@@ -121,6 +127,8 @@ export class ButtonInjector {
     this.restoreBtn.style.display = visible ? 'inline-flex' : 'none';
   }
 
+  // ─── Private ─────────────────────────────────────────────────────────────
+
   private buildButtonWrap(): HTMLDivElement {
     const wrap = document.createElement('div');
     wrap.id = WRAP_ID;
@@ -128,7 +136,7 @@ export class ButtonInjector {
 
     const shuffle = document.createElement('button');
     shuffle.className = 'ytms-shuffle-btn';
-    shuffle.innerHTML = `${SVG_SHUFFLE} True Shuffle`;
+    shuffle.innerHTML = `${SVG_SHUFFLE} Permanently Shuffle`;
     shuffle.title = 'Permanently reorder this playlist using a true random shuffle';
     shuffle.addEventListener('click', e => {
       e.stopPropagation();
@@ -155,7 +163,7 @@ export class ButtonInjector {
   }
 
   /**
-   * Watch for YTM re-rendering the header (which can remove buttons).
+   * Watch for YTM re-rendering the header (which can remove our buttons).
    * Re-inject if the wrap disappears while still on the same playlist.
    */
   private startReAttachObserver(headerEl: Element): void {

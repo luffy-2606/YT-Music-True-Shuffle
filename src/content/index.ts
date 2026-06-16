@@ -48,6 +48,28 @@ class TrueShuffleExtension {
     // Handle the current page immediately
     await this.handleRouteChange();
 
+    // Listen for messages from the popup
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      const playlistId = getPlaylistIdFromUrl();
+
+      if (!isPlaylistPage() || !playlistId) {
+        sendResponse({ ok: false, error: 'Not on a playlist page' });
+        return true;
+      }
+
+      if (message.type === 'YTMS_SHUFFLE') {
+        void this.runShuffle(playlistId);
+        sendResponse({ ok: true });
+      } else if (message.type === 'YTMS_RESTORE') {
+        void this.runRestore(playlistId);
+        sendResponse({ ok: true });
+      } else {
+        sendResponse({ ok: false, error: 'Unknown message type' });
+      }
+
+      return true; // keep channel open for async sendResponse
+    });
+
     logger.info('Boot complete');
   }
 

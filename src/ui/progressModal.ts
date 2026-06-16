@@ -44,7 +44,7 @@ export class ProgressModal {
           <div class="ytms-modal-icon-wrap">${ICONS.shuffle}</div>
           <div>
             <div class="ytms-modal-title">${title}</div>
-            <div class="ytms-modal-sub">YouTube Music True Shuffle</div>
+            <div class="ytms-modal-sub">YouTube Music Permanently Shuffle</div>
           </div>
         </div>
         <div class="ytms-modal-body">
