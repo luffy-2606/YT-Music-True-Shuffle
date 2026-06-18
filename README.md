@@ -42,7 +42,7 @@ This project is built using TypeScript. To set up the development environment:
    npm install
 ```
 
-1. Build the project:
+2. Build the project:
 
 ```Bash
    node build.mjs
@@ -50,7 +50,7 @@ This project is built using TypeScript. To set up the development environment:
 
 *Note: Use your specific build watch command (e.g., npm run watch) during active development.*
 
-1. Load the output directory into Chrome as detailed in the Installation section.
+3. Load the output directory into Chrome as detailed in the Installation section.
 
 ## Contributing
 
