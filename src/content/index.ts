@@ -50,6 +50,11 @@ class TrueShuffleExtension {
 
     // Listen for messages from the popup
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === 'YTMS_PING') {
+        sendResponse({ ok: true, isWorking: this.operationInProgress || false });
+        return true;
+      }
+
       const playlistId = getPlaylistIdFromUrl();
 
       if (!isPlaylistPage() || !playlistId) {

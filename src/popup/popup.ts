@@ -83,36 +83,52 @@ async function init(): Promise<void> {
   const shuffleBtn = document.getElementById('shuffle-btn') as HTMLButtonElement;
   const restoreBtn = document.getElementById('restore-btn') as HTMLButtonElement | null;
 
-  // Poll the content script until it responds or times out
   let contentScriptReady = false;
-  for (let i = 0; i < 100; i++) { // 100*300 ms delay (30 sec)
+  let isWorking = false;
+
+  for (let i = 0; i < 100; i++) { 
     try {
-      await chrome.tabs.sendMessage(tab.id!, { type: 'YTMS_PING' });
+      // Capture the response sent back from the content script
+      const response = await chrome.tabs.sendMessage(tab.id!, { type: 'YTMS_PING' });
+      
       contentScriptReady = true;
-      break;
+      
+      // Check if the content script explicitly tells us it's busy right now
+      if (response && response.isWorking) {
+        isWorking = true;
+      }
+      break; 
     } catch {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
   }
 
-  // Only enable the buttons if the content script actually responded!
+  // SAFE ACTIVATION GUARD
   if (contentScriptReady) {
-    if (shuffleBtn) {
-      shuffleBtn.disabled = false;
-      shuffleBtn.textContent = 'Permanently Shuffle';
-    }
-    if (restoreBtn) {
-      restoreBtn.disabled = false;
-      restoreBtn.innerHTML = '<span class="btn-icon">↩</span> Restore original order';
+    if (isWorking) {
+      // The app is currently shuffling or restoring
+      if (shuffleBtn) {
+        shuffleBtn.disabled = true;
+        shuffleBtn.textContent = 'Working...';
+      }
+      if (restoreBtn) {
+        restoreBtn.disabled = true;
+        restoreBtn.innerHTML = 'Working...';
+      }
+    } else {
+      // Idle state
+      if (shuffleBtn) {
+        shuffleBtn.disabled = false;
+        shuffleBtn.textContent = 'Permanently Shuffle';
+      }
+      if (restoreBtn) {
+        restoreBtn.disabled = false;
+        restoreBtn.innerHTML = '<span class="btn-icon">↩</span> Restore original order';
+      }
     }
   } else {
-    // If it never connected after 15 attempts, keep them disabled and update text
-    if (shuffleBtn) {
-      shuffleBtn.textContent = 'Connection failed!';
-    }
-    if (restoreBtn) {
-      restoreBtn.textContent = 'Connection failed!';
-    }
+    if (shuffleBtn) shuffleBtn.textContent = 'Connection failed!';
+    if (restoreBtn) restoreBtn.textContent = 'Connection failed!';
     showError('Extension connection timed out. Please refresh your YouTube Music page.');
   }
 
