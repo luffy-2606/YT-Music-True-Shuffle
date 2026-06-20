@@ -13,14 +13,29 @@ YouTube Music's default shuffle often repeats tracks or only shuffles a small po
 - **Safe Execution:** Includes state-locking and connection-polling to prevent overlapping actions or crashes during heavy operations.
 
 ## Installation
+1. Clone the repository
+```bash
+   git clone https://github.com/luffy-2606/YT-Music-True-Shuffle.git
+   cd YT-Music-True-Shuffle
+```
 
-Currently, this extension can be installed locally in developer mode:
+3. Install dependencies:
 
-1. Clone or download this repository to your local machine.
-2. Open Google Chrome and navigate to `chrome://extensions/`.
-3. Enable **Developer mode** using the toggle switch in the top right corner.
-4. Click the **Load unpacked** button.
-5. Select the compiled output folder (usually `dist` or `build`) of this repository.
+```bash
+   npm install
+```
+
+3. Build the project:
+
+```Bash
+   node build.mjs
+```
+
+4. Load the Unpacked Extension:
+   * Open your Chromium-based browser (Chrome, Edge, Brave).
+   * Navigate to `chrome://extensions/` (or equivalent).
+   * Toggle **Developer mode** on in the top right corner.
+   * Click **Load unpacked** and select the directory containing the compiled extension files (often `dist/` or the root folder, depending on the current build structure).
 
 ## Usage
 
@@ -32,31 +47,11 @@ Currently, this extension can be installed locally in developer mode:
 4. Wait for the operation to complete. The extension will automatically handle pagination for large playlists.
 5. To revert, simply open the extension popup or click the injected UI button and select "Restore original order".
 
-## Local Development
-
-This project is built using TypeScript. To set up the development environment:
-
-1. Install dependencies:
-
-```bash
-   npm install
-```
-
-2. Build the project:
-
-```Bash
-   node build.mjs
-```
-
-*Note: Use your specific build watch command (e.g., npm run watch) during active development.*
-
-3. Load the output directory into Chrome as detailed in the Installation section.
-
 ## Contributing
 
 Contributions are welcome. If you find a bug or have a feature request, please open an issue first to discuss what you would like to change.
 
-When submitting pull requests, please ensure that your code adheres to the existing TypeScript structure and that any new UI elements match the native YouTube Music design language.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Star History
 
