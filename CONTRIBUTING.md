@@ -29,6 +29,11 @@ git pull origin
 npm install
 node build.mjs
 ```
+**Load the Unpacked Extension**
+   * Open your Chromium-based browser (Chrome, Edge, Brave).
+   * Navigate to `chrome://extensions/` (or equivalent).
+   * Toggle **Developer mode** on in the top right corner.
+   * Click **Load unpacked** and select the directory containing the compiled extension files.
 
 ## Running Checks
 
